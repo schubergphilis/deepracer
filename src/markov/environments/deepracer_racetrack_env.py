@@ -10,6 +10,8 @@ import time
 import traceback
 import sys
 from collections import OrderedDict
+from datadog import initialize, api
+from datetime import datetime
 
 import gym
 import queue
@@ -20,9 +22,19 @@ from markov import utils
 
 logger = utils.Logger(__name__, logging.INFO).get_logger()
 
+options = {
+    'api_key':'XX',
+    'app_key':'XX'
+}
+
+initialize(**options)
+
 # Type of worker
 SIMULATION_WORKER = "SIMULATION_WORKER"
 SAGEMAKER_TRAINING_WORKER = "SAGEMAKER_TRAINING_WORKER"
+
+now = datetime.now()
+SIMULATION_START_TIMESTAMP = now.strftime("%Y/%m/%d_%H:%M:%S")
 
 node_type = os.environ.get("NODE_TYPE", SIMULATION_WORKER)
 if node_type == SIMULATION_WORKER:
@@ -77,6 +89,7 @@ WHEEL_RADIUS = 0.1
 # This number should corespond to the camera FPS, since it is pacing the
 # step rate.
 NUM_STEPS_TO_CHECK_STUCK = 15
+
 
 ### Gym Env ###
 class DeepRacerRacetrackEnv(gym.Env):
@@ -430,6 +443,28 @@ class DeepRacerRacetrackEnv(gym.Env):
             closest_waypoint_index,
             self.track_length,
             time.time()))
+        
+
+        metrics = {
+            "episodes" : self.episodes,
+            "steps" : self.steps,
+            "x" : model_location[0],
+            "y" : model_location[1],
+            "heading" : model_heading,
+            "steering_angle" : self.steering_angle,
+            "speed" : self.speed,
+            "action" : self.action_taken,
+            "reward" : self.reward,
+            "done" : self.done,
+            "all_wheels_on_track" : all_wheels_on_track,
+            "current_progress" : current_progress,
+            "closest_waypoint_index" : closest_waypoint_index,
+            "track_length" : self.track_length,
+            "time" : time.time()
+        }
+        self.log_to_datadog(rewards)
+
+
 
         # Terminate this episode when ready
         if done and node_type == SIMULATION_WORKER:
@@ -515,6 +550,13 @@ class DeepRacerRacetrackEnv(gym.Env):
         robomaker_client.cancel_simulation_job(
             job=self.simulation_job_arn
         )
+
+    def log_to_datadog(self, metrics):
+        for metric, value in metrics.items():
+            if isinstance(value, (int, float)):
+                api.Metric.send(metric=metric, points=value, tags=self.job_type+"-"+SIMULATION_START_TIMESTAMP)
+
+
 
     def send_reward_to_cloudwatch(self, reward):
         session = boto3.session.Session()

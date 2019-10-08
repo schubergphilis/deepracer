@@ -40,6 +40,7 @@ RUN pip install \
     scikit-image==0.15.0 \
     gym==0.10.5 \
     retrying \
+    datadog \
     eventlet \
     boto3 \
     minio==4.0.5 \
